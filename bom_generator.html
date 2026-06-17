@@ -316,23 +316,23 @@ function parseFactura(txt) {
                 txt.match(/CARROCER[ÍI]A\s+PARA\s+BUS\s+([^\n]+)/i) ||
                 txt.match(/Descripci[oó]n\s*[/\\]\s*Description[^\n]*\n\s*(\d+\s+.+)/i);
 
-  // EXW value: look for "VALUE EXW" or "VALOR / VALUE EXW" then US$ in next 150 chars
+  // The Busscar invoice PDF extracts labels first, then USD values in order:
+  // [CIF total, VALUE EXW, GASTOS ORIGEN, FLETE, SEGURO]
+  // So after the "VALOR / VALUE EXW" label block we find the values by position index.
   let valorExworks = '';
-  const exwIdx = txt.search(/VALUE\s+EXW|VALOR\s*\/\s*VALUE\s+EXW/i);
-  if (exwIdx >= 0) {
-    valorExworks = usd(txt.slice(exwIdx, exwIdx + 150));
-  }
-  // Fallback: second US$ amount in the price table (first is usually total)
-  if (!valorExworks) {
-    const allUsd = [...txt.matchAll(/US\$\s*([\d.,]+)/gi)];
-    if (allUsd.length >= 2) valorExworks = allUsd[1][1];
-  }
-
-  // GASTOS ORIGEN / EXPENSES ORIGIN → next US$ amount
   let valorGastosOrigen = '';
-  const gastIdx = txt.search(/GASTOS\s+ORIGEN|EXPENSES\s+ORIGIN/i);
-  if (gastIdx >= 0) {
-    valorGastosOrigen = usd(txt.slice(gastIdx, gastIdx + 150));
+  const summaryIdx = txt.search(/VALOR\s*\/\s*VALUE\s+EXW/i);
+  if (summaryIdx >= 0) {
+    const chunk = txt.slice(summaryIdx, summaryIdx + 600);
+    const allUsd = [...chunk.matchAll(/US\$([\d.,]+)/gi)];
+    // Index 0 = CIF total, 1 = VALUE EXW, 2 = GASTOS ORIGEN, 3 = FLETE, 4 = SEGURO
+    if (allUsd.length >= 2) valorExworks      = allUsd[1][1];
+    if (allUsd.length >= 3) valorGastosOrigen = allUsd[2][1];
+  }
+  // Fallback if label not found
+  if (!valorExworks) {
+    const allUsd = [...txt.matchAll(/US\$([\d.,]+)/gi)];
+    if (allUsd.length >= 2) valorExworks = allUsd[1][1];
   }
 
   return {
@@ -474,8 +474,8 @@ function readConsumos(wb, op) {
   }
 
   // 3. Fallback: DATOS sheet (raw transactions — aggregate by item, filter by OP)
-  if (!materials) {
-    const datosSheet = getSheetBy(wb, 'datos', 'dato');
+  const datosSheet = wb.worksheets.find(w => norm(w.name).includes('dato'));
+  if (!materials && datosSheet) {
     const dH = sheetHeaders(datosSheet);
     const cItem  = findCol(dH, 'ítem','item','codigo','código','part number','referencia');
     const cDesc  = findCol(dH, 'descripción','descripcion','descripci');
@@ -483,7 +483,7 @@ function readConsumos(wb, op) {
     const cCant  = findCol(dH, 'salidas','suma de cantidad','cantidad');
     const cCosto = findCol(dH, 'costo mp','suma de costo total','costo total','costo');
     const cIncl  = findCol(dH, 'incluir');
-    const cOP    = findCol(dH, 'referencia1','o.p. referencia','op referencia','valida','op numero','orden produccion','op');
+    const cOP    = findCol(dH, 'referencia1','o.p. referencia','valida','op numero','orden produccion','op');
     const cProv  = findCol(dH, 'proveedor','razón social','razon social');
     const cOrig  = findCol(dH, 'origen','pais','país');
 
@@ -491,10 +491,7 @@ function readConsumos(wb, op) {
     for (let r = 2; r <= datosSheet.rowCount; r++) {
       const inclRaw = cIncl > 0 ? cellTxt(datosSheet, r, cIncl).toUpperCase() : '';
       if (inclRaw === 'NO') continue;
-      if (opStr && cOP > 0) {
-        const rowOP = cellTxt(datosSheet, r, cOP);
-        if (rowOP !== opStr) continue;
-      }
+      if (opStr && cOP > 0 && cellTxt(datosSheet, r, cOP) !== opStr) continue;
       const item = cellTxt(datosSheet, r, cItem);
       if (!item) continue;
       if (!byItem[item]) {
@@ -512,6 +509,25 @@ function readConsumos(wb, op) {
       byItem[item].costoTotal += Number(cellVal(datosSheet, r, cCosto) ?? 0);
     }
     materials = Object.values(byItem);
+  }
+
+  // ---- Costo por OP desde DATOS (Issue 5): siempre recalcular costoTotal por OP ----
+  // DATOS filtra por OP + INCLUIR != 'NO', sumando Costo MP (sal) por ítem.
+  // Esto reemplaza los costos de FINAL que son totales globales (multi-OP).
+  const datosCostMap = {};
+  if (datosSheet) {
+    const dH2 = sheetHeaders(datosSheet);
+    const dItem2  = findCol(dH2, 'item o.p.','ítem','item');
+    const dCosto2 = findCol(dH2, 'costo mp (sal)','costo mp','costo total','costo');
+    const dIncl2  = findCol(dH2, 'incluir');
+    const dOP2    = findCol(dH2, 'referencia1','o.p. referencia','valida','op numero','op');
+    for (let r = 2; r <= datosSheet.rowCount; r++) {
+      if (dIncl2 > 0 && cellTxt(datosSheet, r, dIncl2).toUpperCase() === 'NO') continue;
+      if (opStr && dOP2 > 0 && cellTxt(datosSheet, r, dOP2) !== opStr) continue;
+      const it = cellTxt(datosSheet, r, dItem2);
+      if (!it) continue;
+      datosCostMap[it] = (datosCostMap[it] || 0) + Number(cellVal(datosSheet, r, dCosto2) || 0);
+    }
   }
 
   // ---- Hoja CONSUMO FINAL — proveedor, % gastos destino, pctGastos ----
@@ -543,7 +559,7 @@ function readConsumos(wb, op) {
     if (m.proveedor && m.origen) paisXProv[m.proveedor] = m.origen;
   }
 
-  return { materials: materials || [], consumoFinal, paisXProv };
+  return { materials: materials || [], consumoFinal, paisXProv, datosCostMap };
 }
 
 function readPartidas(wb) {
@@ -613,10 +629,12 @@ function applyTemplate(ws, tpl, targetRowNum) {
   const row = ws.getRow(targetRowNum);
   tpl.cells.forEach(({ col, style, formula, value }) => {
     const cell = row.getCell(col);
-    cell.style = JSON.parse(JSON.stringify(style));
+    const cleanStyle = JSON.parse(JSON.stringify(style));
+    delete cleanStyle.fill; // No propagar colores de relleno a filas clonadas
+    cell.style = cleanStyle;
     if (formula) {
       cell.value = { formula: adjustFormula(formula, 6, targetRowNum) };
-    } else {
+    } else if (value !== null && value !== undefined) {
       cell.value = value;
     }
   });
@@ -646,7 +664,7 @@ async function runGeneration(confirmed) {
   const cartaWB    = await loadWB(files.carta);
 
   const op = document.getElementById('op').value.trim();
-  const { materials, consumoFinal, paisXProv } = readConsumos(consumosWB, op);
+  const { materials, consumoFinal, paisXProv, datosCostMap } = readConsumos(consumosWB, op);
   const partidas = readPartidas(partidasWB);
   const cartaSet = readCarta(cartaWB);
 
@@ -732,7 +750,10 @@ async function runGeneration(confirmed) {
     row.getCell(5).value  = mat.descripcion;
     row.getCell(7).value  = typeof mat.cantidad === 'number' ? mat.cantidad : parseNum(mat.cantidad);
     row.getCell(8).value  = mat.um;
-    row.getCell(11).value = typeof mat.costoTotal === 'number' ? mat.costoTotal : parseNum(mat.costoTotal);
+    // Costo: usar DATOS filtrado por OP + INCLUIR != 'NO'; si no, usar FINAL
+    const costoOP = datosCostMap[mat.item];
+    row.getCell(11).value = costoOP !== undefined ? costoOP :
+      (typeof mat.costoTotal === 'number' ? mat.costoTotal : parseNum(mat.costoTotal));
 
     // Proveedor
     const cf = consumoFinal[mat.item];
@@ -759,8 +780,26 @@ async function runGeneration(confirmed) {
     row.commit();
   }
 
-  // Rename BOM tab
-  bomSheet.name = `BOM EP${epVal} - VIN ${confirmed.vin}`;
+  // Rename BOM tab and update cross-sheet formula references
+  const oldBomName = bomSheet.name;
+  const newBomName = `BOM EP${epVal} - VIN ${confirmed.vin}`;
+  bomSheet.name = newBomName;
+  if (oldBomName !== newBomName) {
+    const escOld = oldBomName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const reOld = new RegExp(`'${escOld}'`, 'g');
+    for (const ws of wb.worksheets) {
+      if (ws.name === newBomName) continue;
+      ws.eachRow({ includeEmpty: false }, row => {
+        row.eachCell({ includeEmpty: false }, cell => {
+          const v = cell.value;
+          if (v && typeof v === 'object' && v.formula) {
+            const newF = v.formula.replace(reOld, `'${newBomName}'`);
+            if (newF !== v.formula) cell.value = { formula: newF };
+          }
+        });
+      });
+    }
+  }
 
   log('Generando archivo Excel…', 88);
   const buffer = await wb.xlsx.writeBuffer();
