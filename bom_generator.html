@@ -1,0 +1,779 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Generador BOM — Busscar</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',Tahoma,sans-serif;background:#f0f2f5;color:#222;min-height:100vh}
+h1{font-size:1.35rem;color:#fff}
+h2{font-size:1.05rem;color:#1a3a5c;margin-bottom:12px}
+.container{max-width:940px;margin:0 auto;padding:24px 16px}
+.header{background:linear-gradient(135deg,#1a3a5c,#2a5a8c);color:#fff;padding:20px 24px;border-radius:10px;margin-bottom:20px;display:flex;align-items:center;gap:16px}
+.header-icon{font-size:2.5rem}
+.header p{font-size:.82rem;opacity:.85;margin-top:4px}
+.steps{display:flex;gap:4px;margin-bottom:20px}
+.step{flex:1;text-align:center;padding:9px 4px;border-radius:6px;font-size:.78rem;font-weight:700;background:#e2e8f0;color:#8898aa;transition:all .3s}
+.step.active{background:#1a3a5c;color:#fff}
+.step.done{background:#27ae60;color:#fff}
+.card{background:#fff;border-radius:10px;padding:22px;margin-bottom:18px;box-shadow:0 2px 8px rgba(0,0,0,.07)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px}
+@media(max-width:640px){.grid2,.grid3{grid-template-columns:1fr}}
+.field{display:flex;flex-direction:column;gap:5px}
+.field label{font-size:.82rem;font-weight:700;color:#445;letter-spacing:.02em}
+.field input,.field select{padding:8px 11px;border:1.5px solid #d0d8e4;border-radius:7px;font-size:.9rem;transition:border-color .2s}
+.field input:focus,.field select:focus{outline:none;border-color:#1a3a5c}
+.file-wrap{position:relative;cursor:pointer}
+.file-wrap input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%}
+.file-btn{display:flex;align-items:center;gap:8px;padding:9px 12px;border:2px dashed #c8d4e0;border-radius:7px;background:#f8fafc;font-size:.84rem;color:#667;transition:all .2s;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.file-btn.ok{border-color:#27ae60;color:#1e8449;background:#f0fff4;border-style:solid}
+.file-btn.err{border-color:#e74c3c;color:#c0392b}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:10px 22px;border:none;border-radius:7px;font-size:.9rem;font-weight:700;cursor:pointer;transition:all .2s}
+.btn-primary{background:#1a3a5c;color:#fff}
+.btn-primary:hover{background:#14304f}
+.btn-primary:disabled{opacity:.5;cursor:not-allowed}
+.btn-success{background:#27ae60;color:#fff}
+.btn-success:hover{background:#1e8449}
+.btn-muted{background:#e2e8f0;color:#445}
+.btn-muted:hover{background:#d0d8e4}
+.section-label{font-size:.74rem;font-weight:800;text-transform:uppercase;letter-spacing:.08em;color:#9aabbf;margin:14px 0 8px}
+.warn-box{background:#fffbeb;border:1.5px solid #f6c43a;border-radius:8px;padding:16px;margin-top:14px}
+.warn-box h3{color:#b7860b;font-size:.9rem;margin-bottom:8px}
+.warn-item{font-size:.83rem;color:#666;padding:4px 0;border-bottom:1px solid #fdeea8}
+.warn-item:last-child{border-bottom:none}
+.err-box{background:#fff5f5;border:1.5px solid #fc8181;border-radius:8px;padding:14px;margin-bottom:14px}
+.err-box h3{color:#c53030;font-size:.9rem;margin-bottom:6px}
+.err-box div{font-size:.85rem;color:#c53030;padding:2px 0}
+.status-center{text-align:center;padding:32px 16px}
+.status-icon{font-size:3rem;margin-bottom:10px}
+.progress{width:100%;height:7px;background:#e2e8f0;border-radius:4px;margin:16px 0}
+.progress-bar{height:100%;background:#1a3a5c;border-radius:4px;transition:width .35s ease}
+.status-msg{color:#667;font-size:.88rem;margin-top:6px}
+.note{font-size:.8rem;color:#8898aa;margin-top:6px}
+.confirm-note{background:#eff6ff;border:1.5px solid #93c5fd;border-radius:7px;padding:12px 14px;font-size:.83rem;color:#1e40af;margin-bottom:16px}
+.download-area{text-align:center;padding:10px 0 6px}
+.summary{font-size:.85rem;color:#445;margin:8px 0 16px;text-align:center}
+</style>
+</head>
+<body>
+<div class="container">
+
+  <div class="header">
+    <div class="header-icon">🚌</div>
+    <div>
+      <h1>Generador BOM — Busscar</h1>
+      <p>Bill of Materials de exportación · Carga el template oficial y escribe solo los valores necesarios.</p>
+    </div>
+  </div>
+
+  <div class="steps">
+    <div class="step active" id="si1">1 · Archivos</div>
+    <div class="step" id="si2">2 · Confirmar</div>
+    <div class="step" id="si3">3 · Generar</div>
+    <div class="step" id="si4">4 · Descarga</div>
+  </div>
+
+  <!-- ===== STEP 1 ===== -->
+  <div id="step1">
+    <div class="card">
+      <h2>Datos de exportación</h2>
+      <div class="grid3">
+        <div class="field"><label>COD. EXPORTACIÓN</label><input type="text" id="codExp" placeholder="EXP-2024-001"></div>
+        <div class="field"><label>EP (Número de EP)</label><input type="text" id="ep" placeholder="123456"></div>
+        <div class="field"><label># OP a procesar</label><input type="text" id="op" placeholder="5001"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Documentos PDF</h2>
+      <div class="grid2">
+        <div class="field">
+          <label>Factura comercial de la carrocería</label>
+          <div class="file-wrap"><div class="file-btn" id="facturaBtn">📄 Seleccionar PDF…</div><input type="file" accept=".pdf" id="facturaFile"></div>
+        </div>
+        <div class="field">
+          <label>Declaración de importación del chasis</label>
+          <div class="file-wrap"><div class="file-btn" id="declaracionBtn">📄 Seleccionar PDF…</div><input type="file" accept=".pdf" id="declaracionFile"></div>
+        </div>
+      </div>
+      <p class="note">Los datos se extraen automáticamente; podrá corregirlos en el paso 2 antes de generar.</p>
+    </div>
+
+    <div class="card">
+      <h2>Archivos Excel</h2>
+      <div class="grid3">
+        <div class="field">
+          <label>Consumos <span style="color:#8898aa;font-weight:400">(Datos + CONSUMO FINAL + Pais Proveedor)</span></label>
+          <div class="file-wrap"><div class="file-btn" id="consumosBtn">📊 Seleccionar XLSX…</div><input type="file" accept=".xlsx,.xls" id="consumosFile"></div>
+        </div>
+        <div class="field">
+          <label>Partidas arancelarias</label>
+          <div class="file-wrap"><div class="file-btn" id="partidasBtn">📊 Seleccionar XLSX…</div><input type="file" accept=".xlsx,.xls" id="partidasFile"></div>
+        </div>
+        <div class="field">
+          <label>Ítems con Carta de origen</label>
+          <div class="file-wrap"><div class="file-btn" id="cartaBtn">📊 Seleccionar XLSX…</div><input type="file" accept=".xlsx,.xls" id="cartaFile"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="err-box" id="s1err" style="display:none"><h3>⚠ Error</h3><div id="s1errMsg"></div></div>
+    <button class="btn btn-primary" id="btnS1" onclick="goStep2()">Extraer datos y continuar →</button>
+  </div>
+
+  <!-- ===== STEP 2 ===== -->
+  <div id="step2" style="display:none">
+    <div class="card">
+      <h2>Confirmar datos extraídos de los PDFs</h2>
+      <div class="confirm-note">
+        ✋ <strong>Revisión obligatoria.</strong> Este documento define el origen preferencial del producto exportado.
+        Verifique y corrija cada campo antes de continuar.
+      </div>
+
+      <div class="section-label">Factura comercial — Carrocería</div>
+      <div class="grid2">
+        <div class="field"><label>Marca del Chasis</label><input type="text" id="c_marca"></div>
+        <div class="field"><label>Tipo de Carrocería</label><input type="text" id="c_tipo"></div>
+        <div class="field"><label># OP (de la factura)</label><input type="text" id="c_op"></div>
+        <div class="field"><label>VIN</label><input type="text" id="c_vin"></div>
+        <div class="field"><label>Serie de Chasis</label><input type="text" id="c_serie"></div>
+        <div class="field"><label>TRM — factura ($/USD)</label><input type="text" id="c_trm"></div>
+        <div class="field"><label>Valor Exworks (USD)</label><input type="text" id="c_exworks"></div>
+        <div class="field"><label>Valor Gastos de Origen (USD)</label><input type="text" id="c_gastos"></div>
+      </div>
+
+      <div class="section-label" style="margin-top:18px">Declaración de importación — Chasis</div>
+      <div class="grid3">
+        <div class="field"><label>Valor de aduana total (USD)</label><input type="text" id="c_aduana"></div>
+        <div class="field"><label>TRM — declaración ($/USD)</label><input type="text" id="c_trmDecl"></div>
+        <div class="field"><label>Cantidad (dcms / unidades)</label><input type="text" id="c_dcms"></div>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:12px">
+      <button class="btn btn-muted" onclick="showStep(1)">← Volver</button>
+      <button class="btn btn-primary" onclick="goStep3()">Generar BOM →</button>
+    </div>
+  </div>
+
+  <!-- ===== STEP 3 ===== -->
+  <div id="step3" style="display:none">
+    <div class="card">
+      <div class="status-center">
+        <div class="status-icon" id="procIcon">⚙️</div>
+        <h2 id="procTitle">Procesando…</h2>
+        <div class="progress"><div class="progress-bar" id="progressBar" style="width:0%"></div></div>
+        <p class="status-msg" id="procMsg">Iniciando…</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== STEP 4 ===== -->
+  <div id="step4" style="display:none">
+    <div class="card">
+      <div class="status-center">
+        <div class="status-icon">✅</div>
+        <h2>BOM generado exitosamente</h2>
+        <p class="summary" id="summaryLine"></p>
+      </div>
+      <div class="download-area">
+        <button class="btn btn-success" id="btnDownload" onclick="downloadBOM()">⬇ Descargar BOM.xlsx</button>
+      </div>
+    </div>
+
+    <div class="warn-box" id="warningsPanel" style="display:none">
+      <h3>⚠ Advertencias — revise estos ítems manualmente</h3>
+      <div id="warningsList"></div>
+    </div>
+
+    <div style="margin-top:16px">
+      <button class="btn btn-muted" onclick="restart()">← Nuevo BOM</button>
+    </div>
+  </div>
+
+</div>
+<script>
+/* ============================================================
+   TEMPLATE BASE64 — BOM_TEMPLATE_BUSSCAR.xlsx
+   ============================================================ */
+const TEMPLATE_B64 = "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";
+
+/* ============================================================
+   PDF.js worker
+   ============================================================ */
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+/* ============================================================
+   State
+   ============================================================ */
+const files = { factura: null, declaracion: null, consumos: null, partidas: null, carta: null };
+let generatedBuffer = null;
+let generatedFilename = '';
+
+/* ============================================================
+   File inputs
+   ============================================================ */
+const FILE_MAP = [
+  ['facturaFile',    'facturaBtn',    'factura'],
+  ['declaracionFile','declaracionBtn','declaracion'],
+  ['consumosFile',   'consumosBtn',   'consumos'],
+  ['partidasFile',   'partidasBtn',   'partidas'],
+  ['cartaFile',      'cartaBtn',      'carta'],
+];
+
+FILE_MAP.forEach(([inputId, btnId, key]) => {
+  document.getElementById(inputId).addEventListener('change', function() {
+    if (this.files[0]) {
+      files[key] = this.files[0];
+      const btn = document.getElementById(btnId);
+      btn.textContent = '✅ ' + this.files[0].name;
+      btn.classList.add('ok');
+    }
+  });
+});
+
+/* ============================================================
+   Utilities
+   ============================================================ */
+function norm(s) {
+  return (s || '').toString().normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+}
+
+function parseNum(s) {
+  if (s === null || s === undefined) return 0;
+  if (typeof s === 'number') return s;
+  s = s.toString().trim().replace(/\s/g, '');
+  // Detect Colombian format: 1.234.567,89
+  if (/^\d{1,3}(\.\d{3})+(,\d+)?$/.test(s)) {
+    s = s.replace(/\./g, '').replace(',', '.');
+  } else {
+    s = s.replace(',', '.');
+  }
+  return parseFloat(s) || 0;
+}
+
+function normPct(v) {
+  const n = (typeof v === 'number') ? v : parseNum(v);
+  return Math.abs(n) > 1 ? n / 100 : n;
+}
+
+/* ============================================================
+   PDF extraction
+   ============================================================ */
+async function pdfText(file) {
+  const ab = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: ab }).promise;
+  let out = '';
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const pg = await pdf.getPage(p);
+    const c = await pg.getTextContent();
+    out += c.items.map(i => i.str).join(' ') + '\n';
+  }
+  return out;
+}
+
+function near(text, labels, rx) {
+  for (const lbl of labels) {
+    const i = text.toLowerCase().indexOf(lbl.toLowerCase());
+    if (i < 0) continue;
+    const chunk = text.slice(i, i + 300);
+    const m = chunk.match(rx);
+    if (m) return (m[1] || '').trim();
+  }
+  return '';
+}
+
+function parseFactura(txt) {
+  return {
+    marcaChasis:      near(txt, ['marca del chasis','chassis brand','marca chasis','marca:'],    /[:=\s]+([A-Z][A-Z0-9\s\-]+?)(?:\s{2,}|\n|,)/i) ||
+                      txt.match(/\b(VOLVO|MERCEDES|SCANIA|VOLKSWAGEN|MAN|IVECO|DAF|HINO|YUTONG|KING\s*LONG)\b/i)?.[1] || '',
+    tipoCarroceria:   near(txt, ['tipo de carroceria','tipo de carrocer','tipo carroceria','body type'], /[:=\s]+([A-Z][A-Z\s\-]+?)(?:\s{2,}|\n)/i) || '',
+    numOP:            near(txt, ['orden de produccion','# op','op:','op n'],  /[:=\s#]+([A-Z0-9\-]+)/i) ||
+                      txt.match(/\bOP[\s\-#:]*([0-9]+)/i)?.[1] || '',
+    vin:              (txt.match(/\bVIN[:\s#]+([A-Z0-9]{10,20})\b/i) || txt.match(/\b([A-Z0-9]{17})\b/))?.[1] || '',
+    serieChasis:      near(txt, ['serie de chasis','serie chasis','chassis serial','n° de serie'], /[:=\s]+([A-Z0-9\-]+)/i) || '',
+    trm:              near(txt, ['trm','tasa de cambio','exchange rate','tipo de cambio'], /[:=\s]+([\d.,]+)/i) || '',
+    valorExworks:     near(txt, ['exworks','ex works','valor ex','ex-works'],  /[:=\s]+([\d.,]+)/i) ||
+                      near(txt, ['fob','valor fob'],                           /[:=\s]+([\d.,]+)/i) || '',
+    valorGastosOrigen:near(txt, ['gastos de origen','gastos origen','origin expenses','flete origen'], /[:=\s]+([\d.,]+)/i) || '',
+  };
+}
+
+function parseDeclaracion(txt) {
+  return {
+    valorAduana: near(txt, ['valor en aduana','valor de aduana','customs value','valor aduana'], /[:=\s]+([\d.,]+)/i) || '',
+    tasaCambio:  near(txt, ['tasa de cambio','trm','exchange rate'],                             /[:=\s]+([\d.,]+)/i) || '',
+    cantidadDcms:near(txt, ['cantidad','dcms','numero de unidades','n° unidades','bultos'],      /[:=\s]+([\d]+)/i) || '1',
+  };
+}
+
+/* ============================================================
+   Excel reading helpers
+   ============================================================ */
+async function loadWB(file) {
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(await file.arrayBuffer());
+  return wb;
+}
+
+function getSheetBy(wb, ...parts) {
+  for (const p of parts) {
+    const s = wb.worksheets.find(w => norm(w.name).includes(norm(p)));
+    if (s) return s;
+  }
+  return wb.worksheets[0];
+}
+
+function sheetHeaders(sheet, rowNum = 1) {
+  const h = [];
+  sheet.getRow(rowNum).eachCell({ includeEmpty: true }, (c, col) => { h[col - 1] = c.text || ''; });
+  return h;
+}
+
+function findCol(headers, ...pats) {
+  for (let i = 0; i < headers.length; i++) {
+    const h = norm(headers[i]);
+    if (!h) continue;
+    for (const p of pats) { if (h.includes(norm(p))) return i + 1; }
+  }
+  return -1;
+}
+
+function cellVal(sheet, r, col) {
+  if (col < 1) return '';
+  const cell = sheet.getRow(r).getCell(col);
+  const v = cell.value;
+  if (v && typeof v === 'object' && v.result !== undefined) return v.result;
+  if (v && typeof v === 'object' && v.formula) return '';
+  return v ?? '';
+}
+
+function cellTxt(sheet, r, col) {
+  return (cellVal(sheet, r, col) ?? '').toString().trim();
+}
+
+/* ============================================================
+   Data processing from Excel files
+   ============================================================ */
+function readConsumos(wb, op) {
+  // ---- Hoja Datos ----
+  const datosSheet = getSheetBy(wb, 'datos', 'dato');
+  const dH = sheetHeaders(datosSheet);
+  const cItem  = findCol(dH, 'ítem','item','codigo','código','part number','referencia');
+  const cDesc  = findCol(dH, 'descripción','descripcion','descripci');
+  const cUM    = findCol(dH, 'um','unidad de medida','unidad medida','unidad');
+  const cCant  = findCol(dH, 'suma de cantidad','cantidad');
+  const cCosto = findCol(dH, 'suma de costo total','costo total','costo');
+  const cIncl  = findCol(dH, 'incluir');
+  const cOP    = findCol(dH, 'op','orden de produccion','orden produccion');
+
+  const materials = [];
+  const opStr = String(op || '').trim();
+  for (let r = 2; r <= datosSheet.rowCount; r++) {
+    const inclRaw = cIncl > 0 ? cellTxt(datosSheet, r, cIncl).toUpperCase() : '';
+    if (inclRaw === 'NO') continue;
+    if (opStr && cOP > 0 && cellTxt(datosSheet, r, cOP) !== opStr) continue;
+    const item = cellTxt(datosSheet, r, cItem);
+    if (!item) continue;
+    materials.push({
+      item,
+      descripcion: cellTxt(datosSheet, r, cDesc),
+      um:          cellTxt(datosSheet, r, cUM),
+      cantidad:    cellVal(datosSheet, r, cCant) ?? 0,
+      costoTotal:  cellVal(datosSheet, r, cCosto) ?? 0,
+    });
+  }
+
+  // ---- Hoja CONSUMO FINAL ----
+  const cfSheet = getSheetBy(wb, 'consumo final','consumo_final','cf');
+  const cfH = sheetHeaders(cfSheet);
+  const cfItem = findCol(cfH, 'ítem','item','codigo','código');
+  const cfProv = findCol(cfH, 'razón social','razon social','proveedor','razón','nombre proveedor');
+  const cfGast = findCol(cfH, '% gastos destino','gastos destino','gastos en destino','% gastos','cif');
+
+  const consumoFinal = {};
+  for (let r = 2; r <= cfSheet.rowCount; r++) {
+    const it = cellTxt(cfSheet, r, cfItem);
+    if (!it || consumoFinal[it]) continue;
+    consumoFinal[it] = {
+      proveedor: cellTxt(cfSheet, r, cfProv),
+      pctGastos: normPct(cellVal(cfSheet, r, cfGast)),
+    };
+  }
+
+  // ---- Hoja Pais Proveedor ----
+  const ppSheet = getSheetBy(wb, 'pais proveedor','pais_proveedor','pais');
+  const ppH = sheetHeaders(ppSheet);
+  const ppProv = findCol(ppH, 'razón social','razon social','proveedor','nombre');
+  const ppPais = findCol(ppH, 'pais','país','country','país de compra','pais compra');
+
+  const paisXProv = {};
+  for (let r = 2; r <= ppSheet.rowCount; r++) {
+    const pr = cellTxt(ppSheet, r, ppProv);
+    const pa = cellTxt(ppSheet, r, ppPais);
+    if (pr && pa) paisXProv[pr] = pa;
+  }
+
+  return { materials, consumoFinal, paisXProv };
+}
+
+function readPartidas(wb) {
+  const sheet = wb.worksheets[0];
+  const h = sheetHeaders(sheet);
+  const cItem = findCol(h, 'ítem','item','codigo','código','part');
+  const cHTS  = findCol(h, 'subpartida','hts','arancel','partida arancelaria','partida');
+  const cDesc = findCol(h, 'descripción larga','descripcion larga','long desc','descripción','descripcion');
+
+  const out = {};
+  for (let r = 2; r <= sheet.rowCount; r++) {
+    const it = cellTxt(sheet, r, cItem);
+    if (!it) continue;
+    out[it] = {
+      subpartida: cellTxt(sheet, r, cHTS),
+      descLarga:  cellTxt(sheet, r, cDesc),
+    };
+  }
+  return out;
+}
+
+function readCarta(wb) {
+  const sheet = wb.worksheets[0];
+  const h = sheetHeaders(sheet);
+  const cItem = findCol(h, 'ítem','item','codigo','código');
+  const cProv = findCol(h, 'proveedor','razón social','razon social','nombre');
+  const s = new Set();
+  for (let r = 2; r <= sheet.rowCount; r++) {
+    const it = cellTxt(sheet, r, cItem);
+    const pr = cellTxt(sheet, r, cProv);
+    if (it) s.add(`${it}|||${pr}`);
+  }
+  return s;
+}
+
+/* ============================================================
+   Formula row cloning
+   ============================================================ */
+function adjustFormula(formula, fromRow, toRow) {
+  if (!formula || typeof formula !== 'string') return formula;
+  const diff = toRow - fromRow;
+  return formula.replace(/([A-Z]+)(\d+)/g, (m, col, rowStr, offset, str) => {
+    if (offset > 0 && str[offset - 1] === '!') return m;
+    return col + (parseInt(rowStr) + diff);
+  });
+}
+
+function snapStyle(cell) {
+  try { return JSON.parse(JSON.stringify(cell.style || {})); } catch { return {}; }
+}
+
+// Capture template row 6 into a reusable structure
+function captureTemplateRow(ws, rowNum) {
+  const row = ws.getRow(rowNum);
+  const cells = [];
+  row.eachCell({ includeEmpty: true }, (cell, col) => {
+    const v = cell.value;
+    let formula = null;
+    if (v && typeof v === 'object' && v.formula) formula = v.formula;
+    else if (typeof cell.formula === 'string' && cell.formula) formula = cell.formula;
+    cells.push({ col, style: snapStyle(cell), formula, value: formula ? null : v });
+  });
+  return { cells, height: row.height };
+}
+
+function applyTemplate(ws, tpl, targetRowNum) {
+  const row = ws.getRow(targetRowNum);
+  tpl.cells.forEach(({ col, style, formula, value }) => {
+    const cell = row.getCell(col);
+    cell.style = JSON.parse(JSON.stringify(style));
+    if (formula) {
+      cell.value = { formula: adjustFormula(formula, 6, targetRowNum) };
+    } else {
+      cell.value = value;
+    }
+  });
+  if (tpl.height) row.height = tpl.height;
+  row.commit();
+}
+
+/* ============================================================
+   Core BOM generation
+   ============================================================ */
+async function runGeneration(confirmed) {
+  const log = (msg, pct) => {
+    document.getElementById('procMsg').textContent = msg;
+    document.getElementById('progressBar').style.width = pct + '%';
+  };
+
+  const warnings = [];
+
+  log('Cargando template BOM…', 8);
+  const templateBytes = Uint8Array.from(atob(TEMPLATE_B64), c => c.charCodeAt(0));
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(templateBytes.buffer);
+
+  log('Leyendo archivos Excel…', 20);
+  const consumosWB = await loadWB(files.consumos);
+  const partidasWB = await loadWB(files.partidas);
+  const cartaWB    = await loadWB(files.carta);
+
+  const op = document.getElementById('op').value.trim();
+  const { materials, consumoFinal, paisXProv } = readConsumos(consumosWB, op);
+  const partidas = readPartidas(partidasWB);
+  const cartaSet = readCarta(cartaWB);
+
+  log('Localizando hojas del template…', 32);
+  const bomSheet = wb.worksheets[0];
+  const cifSheet = wb.worksheets.find(w => norm(w.name).includes('porcentajes')) || wb.worksheets[2];
+  const vcrSheet = wb.worksheets.find(w => norm(w.name) === 'vcr') || wb.worksheets[3];
+
+  // ---- VCR ----
+  log('Llenando hoja VCR…', 38);
+  const epVal   = document.getElementById('ep').value.trim();
+  const codExp  = document.getElementById('codExp').value.trim();
+  const fobCar  = parseNum(confirmed.valorExworks) + parseNum(confirmed.valorGastosOrigen);
+  const cantD   = parseNum(confirmed.cantidadDcms) || 1;
+  const aduana  = parseNum(confirmed.valorAduana);
+
+  vcrSheet.getCell('A2').value = codExp;
+  vcrSheet.getCell('B2').value = epVal;
+  vcrSheet.getCell('C2').value = confirmed.vin;
+  vcrSheet.getCell('D2').value = fobCar;
+  vcrSheet.getCell('E2').value = parseNum(confirmed.trm);
+  vcrSheet.getCell('H2').value = aduana / cantD;
+  vcrSheet.getCell('I2').value = parseNum(confirmed.trmDecl);
+
+  // ---- BOM headers rows 3-5 ----
+  log('Llenando cabeceras BOM (filas 3–5)…', 44);
+  const marca  = confirmed.marcaChasis;
+  const tipo   = confirmed.tipoCarroceria;
+  const serie  = confirmed.serieChasis;
+  const numOP  = confirmed.numOP || op;
+  const desc35 = `${tipo} ${marca}`.trim();
+
+  bomSheet.getCell('E3').value = desc35;
+  bomSheet.getCell('F3').value = desc35;
+  bomSheet.getCell('E4').value = marca;
+  bomSheet.getCell('F4').value = marca;
+  bomSheet.getCell('E5').value = tipo;
+  bomSheet.getCell('F5').value = tipo;
+  bomSheet.getCell('A3').value = numOP;
+  bomSheet.getCell('A5').value = numOP;
+  const a4 = bomSheet.getCell('A4');
+  a4.value = marca + '\n' + serie;
+  a4.alignment = { ...(a4.alignment || {}), wrapText: true, vertical: 'top' };
+
+  // ---- PORCENTAJES CIF ----
+  log('Reconstruyendo hoja PORCENTAJES CIF…', 50);
+  // Clear existing data rows
+  for (let r = 2; r <= (cifSheet.rowCount || 100); r++) {
+    const row = cifSheet.getRow(r);
+    row.eachCell({ includeEmpty: false }, cell => { cell.value = null; });
+    row.commit();
+  }
+  // Write from consumoFinal
+  let cifIdx = 2;
+  for (const [item, cf] of Object.entries(consumoFinal)) {
+    const row = cifSheet.getRow(cifIdx++);
+    row.getCell(1).value = item;
+    row.getCell(2).value = cf.pctGastos;
+    row.commit();
+  }
+
+  // ---- Material rows ----
+  log('Procesando materiales…', 58);
+  if (materials.length === 0) {
+    warnings.push('No se encontraron materiales. Verifique el # OP y los nombres de las columnas en la hoja Datos.');
+  }
+
+  // Capture template row before any writes
+  const tpl = captureTemplateRow(bomSheet, 6);
+
+  for (let i = 0; i < materials.length; i++) {
+    const mat  = materials[i];
+    const rowN = 6 + i;
+
+    if (i > 0) {
+      applyTemplate(bomSheet, tpl, rowN);
+    }
+
+    const row = bomSheet.getRow(rowN);
+
+    // Input columns: A(1) E(5) F(6) G(7) H(8) K(11) M(13) N(14) O(15) Q(17)
+    row.getCell(1).value  = mat.item;
+    row.getCell(5).value  = mat.descripcion;
+    row.getCell(7).value  = typeof mat.cantidad === 'number' ? mat.cantidad : parseNum(mat.cantidad);
+    row.getCell(8).value  = mat.um;
+    row.getCell(11).value = typeof mat.costoTotal === 'number' ? mat.costoTotal : parseNum(mat.costoTotal);
+
+    // Proveedor
+    const cf = consumoFinal[mat.item];
+    const prov = cf?.proveedor || '';
+    if (!prov) warnings.push(`Ítem ${mat.item}: sin proveedor en CONSUMO FINAL.`);
+    row.getCell(13).value = prov;
+
+    // País
+    const pais = prov ? (paisXProv[prov] || '') : '';
+    if (!pais) warnings.push(`Ítem ${mat.item} (prov: "${prov}"): país no encontrado en Pais Proveedor.`);
+    row.getCell(14).value = pais;
+
+    // Partida
+    const pt = partidas[mat.item];
+    if (!pt) warnings.push(`Ítem ${mat.item}: no encontrado en archivo de Partidas.`);
+    row.getCell(6).value  = pt?.descLarga  || '';
+    row.getCell(15).value = pt?.subpartida || '';
+
+    // Originario Q
+    const cartaKey = `${mat.item}|||${prov}`;
+    const cartaAny = cartaSet.has(cartaKey) || [...cartaSet].some(k => k.startsWith(mat.item + '|||'));
+    row.getCell(17).value = cartaAny ? 'S' : 'N';
+
+    row.commit();
+  }
+
+  // Rename BOM tab
+  bomSheet.name = `BOM EP${epVal} - VIN ${confirmed.vin}`;
+
+  log('Generando archivo Excel…', 88);
+  const buffer = await wb.xlsx.writeBuffer();
+
+  log('¡Listo!', 100);
+  const filename = `BOM_EP${epVal}_VIN_${confirmed.vin || 'XXXXXX'}.xlsx`;
+  return { buffer, warnings, filename };
+}
+
+/* ============================================================
+   Navigation
+   ============================================================ */
+function showStep(n) {
+  [1,2,3,4].forEach(i => {
+    document.getElementById('step' + i).style.display = i === n ? '' : 'none';
+    const si = document.getElementById('si' + i);
+    si.className = 'step' + (i < n ? ' done' : i === n ? ' active' : '');
+  });
+}
+
+async function goStep2() {
+  const errs = [];
+  if (!document.getElementById('codExp').value.trim()) errs.push('COD. EXPORTACIÓN es requerido.');
+  if (!document.getElementById('ep').value.trim())     errs.push('EP es requerido.');
+  if (!files.factura)     errs.push('Falta la Factura comercial (PDF).');
+  if (!files.declaracion) errs.push('Falta la Declaración de importación (PDF).');
+  if (!files.consumos)    errs.push('Falta el archivo de Consumos (Excel).');
+  if (!files.partidas)    errs.push('Falta el archivo de Partidas (Excel).');
+  if (!files.carta)       errs.push('Falta el archivo Ítems con Carta (Excel).');
+
+  const errBox = document.getElementById('s1err');
+  if (errs.length) {
+    document.getElementById('s1errMsg').innerHTML = errs.map(e => `<div>• ${e}</div>`).join('');
+    errBox.style.display = '';
+    return;
+  }
+  errBox.style.display = 'none';
+
+  const btn = document.getElementById('btnS1');
+  btn.disabled = true;
+  btn.textContent = '⏳ Extrayendo datos de PDFs…';
+
+  try {
+    const [ft, dt] = await Promise.all([pdfText(files.factura), pdfText(files.declaracion)]);
+    const fd = parseFactura(ft);
+    const dd = parseDeclaracion(dt);
+
+    document.getElementById('c_marca').value   = fd.marcaChasis;
+    document.getElementById('c_tipo').value    = fd.tipoCarroceria;
+    document.getElementById('c_op').value      = fd.numOP || document.getElementById('op').value;
+    document.getElementById('c_vin').value     = fd.vin;
+    document.getElementById('c_serie').value   = fd.serieChasis;
+    document.getElementById('c_trm').value     = fd.trm;
+    document.getElementById('c_exworks').value = fd.valorExworks;
+    document.getElementById('c_gastos').value  = fd.valorGastosOrigen;
+    document.getElementById('c_aduana').value  = dd.valorAduana;
+    document.getElementById('c_trmDecl').value = dd.tasaCambio;
+    document.getElementById('c_dcms').value    = dd.cantidadDcms;
+
+    showStep(2);
+  } catch (e) {
+    document.getElementById('s1errMsg').innerHTML = `<div>Error al leer PDFs: ${e.message}</div>`;
+    errBox.style.display = '';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Extraer datos y continuar →';
+  }
+}
+
+async function goStep3() {
+  const confirmed = {
+    marcaChasis:       document.getElementById('c_marca').value.trim(),
+    tipoCarroceria:    document.getElementById('c_tipo').value.trim(),
+    numOP:             document.getElementById('c_op').value.trim(),
+    vin:               document.getElementById('c_vin').value.trim(),
+    serieChasis:       document.getElementById('c_serie').value.trim(),
+    trm:               document.getElementById('c_trm').value.trim(),
+    valorExworks:      document.getElementById('c_exworks').value.trim(),
+    valorGastosOrigen: document.getElementById('c_gastos').value.trim(),
+    valorAduana:       document.getElementById('c_aduana').value.trim(),
+    trmDecl:           document.getElementById('c_trmDecl').value.trim(),
+    cantidadDcms:      document.getElementById('c_dcms').value.trim(),
+  };
+
+  showStep(3);
+
+  try {
+    const result = await runGeneration(confirmed);
+    generatedBuffer   = result.buffer;
+    generatedFilename = result.filename;
+
+    document.getElementById('summaryLine').textContent =
+      `EP ${document.getElementById('ep').value.trim()} · VIN ${confirmed.vin} · ${result.warnings.length} advertencia(s)`;
+
+    if (result.warnings.length) {
+      document.getElementById('warningsList').innerHTML =
+        [...new Set(result.warnings)].map(w => `<div class="warn-item">⚠ ${w}</div>`).join('');
+      document.getElementById('warningsPanel').style.display = '';
+    } else {
+      document.getElementById('warningsPanel').style.display = 'none';
+    }
+
+    showStep(4);
+  } catch (e) {
+    document.getElementById('procIcon').textContent = '❌';
+    document.getElementById('procTitle').textContent = 'Error al generar';
+    document.getElementById('procMsg').textContent = e.message;
+    document.getElementById('progressBar').style.background = '#e53e3e';
+    console.error(e);
+  }
+}
+
+function downloadBOM() {
+  if (!generatedBuffer) return;
+  const blob = new Blob([generatedBuffer],
+    { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const url = URL.createObjectURL(blob);
+  const a = Object.assign(document.createElement('a'), { href: url, download: generatedFilename });
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
+function restart() {
+  Object.keys(files).forEach(k => { files[k] = null; });
+  generatedBuffer = null;
+  FILE_MAP.forEach(([, btnId]) => {
+    const b = document.getElementById(btnId);
+    b.classList.remove('ok','err');
+    b.textContent = btnId.includes('carta') || btnId.includes('consumos') || btnId.includes('partidas')
+      ? '📊 Seleccionar XLSX…' : '📄 Seleccionar PDF…';
+  });
+  document.getElementById('warningsPanel').style.display = 'none';
+  document.getElementById('progressBar').style.cssText = 'width:0%;background:#1a3a5c';
+  showStep(1);
+}
+</script>
+</body>
+</html>
