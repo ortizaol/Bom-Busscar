@@ -514,11 +514,13 @@ function readConsumos(wb, op) {
   // ---- Costo por OP desde DATOS (Issue 5): siempre recalcular costoTotal por OP ----
   // DATOS filtra por OP + INCLUIR != 'NO', sumando Costo MP (sal) por ítem.
   // Esto reemplaza los costos de FINAL que son totales globales (multi-OP).
-  const datosCostMap = {};
+  const datosCostMap  = {};
+  const datosQuantMap = {};
   if (datosSheet) {
-    const dH2 = sheetHeaders(datosSheet);
-    const dItem2  = findCol(dH2, 'item o.p.','ítem','item');
+    const dH2     = sheetHeaders(datosSheet);
+    const dItem2  = findCol(dH2, 'ítem','item');
     const dCosto2 = findCol(dH2, 'costo mp (sal)','costo mp','costo total','costo');
+    const dCant2  = findCol(dH2, 'salidas (inv.)','salidas','suma de cantidad','cantidad');
     const dIncl2  = findCol(dH2, 'incluir');
     const dOP2    = findCol(dH2, 'referencia1','o.p. referencia','valida','op numero','op');
     for (let r = 2; r <= datosSheet.rowCount; r++) {
@@ -526,7 +528,8 @@ function readConsumos(wb, op) {
       if (opStr && dOP2 > 0 && cellTxt(datosSheet, r, dOP2) !== opStr) continue;
       const it = cellTxt(datosSheet, r, dItem2);
       if (!it) continue;
-      datosCostMap[it] = (datosCostMap[it] || 0) + Number(cellVal(datosSheet, r, dCosto2) || 0);
+      datosCostMap[it]  = (datosCostMap[it]  || 0) + Number(cellVal(datosSheet, r, dCosto2) || 0);
+      datosQuantMap[it] = (datosQuantMap[it] || 0)  + Number(cellVal(datosSheet, r, dCant2)  || 0);
     }
   }
 
@@ -559,7 +562,7 @@ function readConsumos(wb, op) {
     if (m.proveedor && m.origen) paisXProv[m.proveedor] = m.origen;
   }
 
-  return { materials: materials || [], consumoFinal, paisXProv, datosCostMap };
+  return { materials: materials || [], consumoFinal, paisXProv, datosCostMap, datosQuantMap };
 }
 
 function readPartidas(wb) {
@@ -664,7 +667,7 @@ async function runGeneration(confirmed) {
   const cartaWB    = await loadWB(files.carta);
 
   const op = document.getElementById('op').value.trim();
-  const { materials, consumoFinal, paisXProv, datosCostMap } = readConsumos(consumosWB, op);
+  const { materials, consumoFinal, paisXProv, datosCostMap, datosQuantMap } = readConsumos(consumosWB, op);
   const partidas = readPartidas(partidasWB);
   const cartaSet = readCarta(cartaWB);
 
@@ -745,37 +748,54 @@ async function runGeneration(confirmed) {
 
     const row = bomSheet.getRow(rowN);
 
-    // Input columns: A(1) E(5) F(6) G(7) H(8) K(11) M(13) N(14) O(15) Q(17)
+    // A: Item Number
     row.getCell(1).value  = mat.item;
+    // B,C: N1, N2 — dejar vacío (no tocar)
+    // D: N3 nivel — fijo = 3
+    row.getCell(4).value  = 3;
+    // E: Descripción genérica (DATOS)
     row.getCell(5).value  = mat.descripcion;
-    row.getCell(7).value  = typeof mat.cantidad === 'number' ? mat.cantidad : parseNum(mat.cantidad);
+    // F: Descripción larga (Partidas)
+    const pt = partidas[mat.item];
+    if (!pt) warnings.push(`Ítem ${mat.item}: no encontrado en archivo de Partidas.`);
+    row.getCell(6).value  = pt?.descLarga || '';
+    // G: Cantidad desde DATOS (Salidas inv.) por OP+INCLUIR; fallback FINAL
+    const cantOP = datosQuantMap[mat.item];
+    row.getCell(7).value  = cantOP !== undefined ? cantOP :
+      (typeof mat.cantidad === 'number' ? mat.cantidad : parseNum(mat.cantidad));
+    // H: UM
     row.getCell(8).value  = mat.um;
-    // Costo: usar DATOS filtrado por OP + INCLUIR != 'NO'; si no, usar FINAL
+    // I: Inventory Code — fijo
+    row.getCell(9).value  = 'INVMPD';
+    // J: Desc. código inventario — fijo
+    row.getCell(10).value = 'MATERIALES DIRECTOS';
+    // K: Costo Promedio Total (Suma Costo MP sal, DATOS, por OP+INCLUIR)
     const costoOP = datosCostMap[mat.item];
     row.getCell(11).value = costoOP !== undefined ? costoOP :
       (typeof mat.costoTotal === 'number' ? mat.costoTotal : parseNum(mat.costoTotal));
-
-    // Proveedor
+    // L: fórmula template =K-K*T — NO tocar
+    // M: Proveedor Material (CONSUMO FINAL)
     const cf = consumoFinal[mat.item];
     const prov = cf?.proveedor || mat.proveedor || '';
     if (!prov) warnings.push(`Ítem ${mat.item}: sin proveedor en CONSUMO FINAL.`);
     row.getCell(13).value = prov;
-
-    // País
+    // N: País de compra
     const pais = prov ? (paisXProv[prov] || cf?.origen || mat.origen || '') : (mat.origen || '');
     if (!pais) warnings.push(`Ítem ${mat.item} (prov: "${prov}"): país no encontrado.`);
     row.getCell(14).value = pais;
-
-    // Partida
-    const pt = partidas[mat.item];
-    if (!pt) warnings.push(`Ítem ${mat.item}: no encontrado en archivo de Partidas.`);
-    row.getCell(6).value  = pt?.descLarga  || '';
+    // O: Subpartida HTS (Partidas)
     row.getCell(15).value = pt?.subpartida || '';
-
-    // Originario Q
+    // P: Material Level — fijo
+    row.getCell(16).value = 'PM';
+    // Q: Originario para VCR (Items con Carta)
     const cartaKey = `${mat.item}|||${prov}`;
     const cartaAny = cartaSet.has(cartaKey) || [...cartaSet].some(k => k.startsWith(mat.item + '|||'));
     row.getCell(17).value = cartaAny ? 'S' : 'N';
+    // R: fórmula template =IF(Q="N","NO","SI") — NO tocar
+    // S: Moneda — fijo
+    row.getCell(19).value = 'COP';
+    // T: %CIF (CONSUMO FINAL % GASTOS DESTINO)
+    row.getCell(20).value = cf?.pctGastos ?? 0;
 
     row.commit();
   }
