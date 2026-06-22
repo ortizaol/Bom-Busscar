@@ -515,12 +515,10 @@ function readConsumos(wb, op) {
   // DATOS filtra por OP + INCLUIR != 'NO', sumando Costo MP (sal) por ítem.
   // Esto reemplaza los costos de FINAL que son totales globales (multi-OP).
   const datosCostMap  = {};
-  const datosQuantMap = {};
   if (datosSheet) {
     const dH2     = sheetHeaders(datosSheet);
     const dItem2  = findCol(dH2, 'ítem','item');
     const dCosto2 = findCol(dH2, 'costo mp (sal)','costo mp','costo total','costo');
-    const dCant2  = findCol(dH2, 'salidas (inv.)','salidas','suma de cantidad','cantidad');
     const dIncl2  = findCol(dH2, 'incluir');
     const dOP2    = findCol(dH2, 'referencia1','o.p. referencia','valida','op numero','op');
     for (let r = 2; r <= datosSheet.rowCount; r++) {
@@ -529,7 +527,6 @@ function readConsumos(wb, op) {
       const it = cellTxt(datosSheet, r, dItem2);
       if (!it) continue;
       datosCostMap[it]  = (datosCostMap[it]  || 0) + Number(cellVal(datosSheet, r, dCosto2) || 0);
-      datosQuantMap[it] = (datosQuantMap[it] || 0)  + Number(cellVal(datosSheet, r, dCant2)  || 0);
     }
   }
 
@@ -562,7 +559,7 @@ function readConsumos(wb, op) {
     if (m.proveedor && m.origen) paisXProv[m.proveedor] = m.origen;
   }
 
-  return { materials: materials || [], consumoFinal, paisXProv, datosCostMap, datosQuantMap };
+  return { materials: materials || [], consumoFinal, paisXProv, datosCostMap };
 }
 
 function readPartidas(wb) {
@@ -667,7 +664,7 @@ async function runGeneration(confirmed) {
   const cartaWB    = await loadWB(files.carta);
 
   const op = document.getElementById('op').value.trim();
-  const { materials, consumoFinal, paisXProv, datosCostMap, datosQuantMap } = readConsumos(consumosWB, op);
+  const { materials, consumoFinal, paisXProv, datosCostMap } = readConsumos(consumosWB, op);
   const partidas = readPartidas(partidasWB);
   const cartaSet = readCarta(cartaWB);
 
@@ -759,10 +756,8 @@ async function runGeneration(confirmed) {
     const pt = partidas[mat.item];
     if (!pt) warnings.push(`Ítem ${mat.item}: no encontrado en archivo de Partidas.`);
     row.getCell(6).value  = pt?.descLarga || '';
-    // G: Cantidad desde DATOS (Salidas inv.) por OP+INCLUIR; fallback FINAL
-    const cantOP = datosQuantMap[mat.item];
-    row.getCell(7).value  = cantOP !== undefined ? cantOP :
-      (typeof mat.cantidad === 'number' ? mat.cantidad : parseNum(mat.cantidad));
+    // G: Cantidad consolidada del material (hoja FINAL / "Suma de Cantidad")
+    row.getCell(7).value  = typeof mat.cantidad === 'number' ? mat.cantidad : parseNum(mat.cantidad);
     // H: UM
     row.getCell(8).value  = mat.um;
     // I: Inventory Code — fijo
@@ -794,8 +789,8 @@ async function runGeneration(confirmed) {
     // R: fórmula template =IF(Q="N","NO","SI") — NO tocar
     // S: Moneda — fijo
     row.getCell(19).value = 'COP';
-    // T: %CIF (CONSUMO FINAL % GASTOS DESTINO)
-    row.getCell(20).value = cf?.pctGastos ?? 0;
+    // T: %CIF — NO tocar. Es fórmula VLOOKUP del template contra 'PORCENTAJES CIF'.
+    //    applyTemplate clona la fórmula de T6 en filas i>0; la fila 6 ya la trae.
 
     row.commit();
   }
