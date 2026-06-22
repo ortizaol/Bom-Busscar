@@ -563,22 +563,31 @@ function readConsumos(wb, op) {
 }
 
 function readPartidas(wb) {
-  const sheet = wb.worksheets[0];
+  const sheet = wb.worksheets.find(w => norm(w.name) === 'bd') ||
+                wb.worksheets.find(w => norm(w.name).includes('bd'));
+  if (!sheet) throw new Error('No se encontró la hoja "BD" en el archivo de Partidas.');
   const h = sheetHeaders(sheet);
-  const cItem = findCol(h, 'ítem','item','codigo','código','part');
-  const cHTS  = findCol(h, 'subpartida','hts','arancel','partida arancelaria','partida');
-  const cDesc = findCol(h, 'descripción larga','descripcion larga','long desc','descripción','descripcion');
-
+  const cItem = findCol(h, 'item', 'codigo', 'codigo');
+  const cDesc = findCol(h, 'descripcion larga', 'descripcion larga');
+  const cHTS  = findCol(h, 'partida arancelaria', 'subpartida', 'hts', 'arancel', 'partida');
+  const cDescCorta = findCol(h, 'descripcion corta', 'descripcion', 'desc');
+  const warnings = [];
   const out = {};
   for (let r = 2; r <= sheet.rowCount; r++) {
-    const it = cellTxt(sheet, r, cItem);
+    const it = cellTxt(sheet, r, cItem).trim().replace(/ /g, '').trim();
     if (!it) continue;
+    let descLarga = cDesc > 0 ? cellTxt(sheet, r, cDesc).trim().replace(/ /g, '').trim() : '';
+    const descCorta = cDescCorta > 0 ? cellTxt(sheet, r, cDescCorta).trim().replace(/ /g, '').trim() : '';
+    if (!descLarga && descCorta) {
+      warnings.push(`Ítem ${it}: sin DESCRIPCION LARGA, usando descripción corta como fallback.`);
+      descLarga = descCorta;
+    }
     out[it] = {
-      subpartida: cellTxt(sheet, r, cHTS),
-      descLarga:  cellTxt(sheet, r, cDesc),
+      subpartida: cHTS > 0 ? cellTxt(sheet, r, cHTS).trim().replace(/ /g, '').trim() : '',
+      descLarga,
     };
   }
-  return out;
+  return { partidas: out, warnings };
 }
 
 function readCarta(wb) {
@@ -664,8 +673,10 @@ async function runGeneration(confirmed) {
   const cartaWB    = await loadWB(files.carta);
 
   const op = document.getElementById('op').value.trim();
-  const { materials, consumoFinal, paisXProv, datosCostMap } = readConsumos(consumosWB, op);
-  const partidas = readPartidas(partidasWB);
+  const { materials, consumoFinal } = readConsumos(consumosWB, op);
+  const opItemSet = new Set(materials.map(m => m.item));
+  const { partidas, warnings: partidasWarnings } = readPartidas(partidasWB);
+  if (partidasWarnings.length) warnings.push(...partidasWarnings);
   const cartaSet = readCarta(cartaWB);
 
   log('Localizando hojas del template…', 32);
@@ -720,6 +731,7 @@ async function runGeneration(confirmed) {
   // Write from consumoFinal
   let cifIdx = 2;
   for (const [item, cf] of Object.entries(consumoFinal)) {
+    if (!opItemSet.has(item)) continue;  // only write rows for items in opItemSet
     const row = cifSheet.getRow(cifIdx++);
     row.getCell(1).value = item;
     row.getCell(2).value = cf.pctGastos;
@@ -755,7 +767,8 @@ async function runGeneration(confirmed) {
     // F: Descripción larga (Partidas)
     const pt = partidas[mat.item];
     if (!pt) warnings.push(`Ítem ${mat.item}: no encontrado en archivo de Partidas.`);
-    row.getCell(6).value  = pt?.descLarga || '';
+    if (pt && !pt.descLarga) warnings.push(`Ítem ${mat.item}: sin DESCRIPCION LARGA en Partidas.`);
+    row.getCell(6).value  = pt?.descLarga || mat.descripcion || '';
     // G: Cantidad consolidada del material (hoja FINAL / "Suma de Cantidad")
     row.getCell(7).value  = typeof mat.cantidad === 'number' ? mat.cantidad : parseNum(mat.cantidad);
     // H: UM
@@ -764,26 +777,21 @@ async function runGeneration(confirmed) {
     row.getCell(9).value  = 'INVMPD';
     // J: Desc. código inventario — fijo
     row.getCell(10).value = 'MATERIALES DIRECTOS';
-    // K: Costo Promedio Total (Suma Costo MP sal, DATOS, por OP+INCLUIR)
-    const costoOP = datosCostMap[mat.item];
-    row.getCell(11).value = costoOP !== undefined ? costoOP :
-      (typeof mat.costoTotal === 'number' ? mat.costoTotal : parseNum(mat.costoTotal));
+    // K: Costo Promedio Total
+    row.getCell(11).value = mat.costoTotal;
     // L: fórmula template =K-K*T — NO tocar
     // M: Proveedor Material (CONSUMO FINAL)
     const cf = consumoFinal[mat.item];
-    const prov = cf?.proveedor || mat.proveedor || '';
-    if (!prov) warnings.push(`Ítem ${mat.item}: sin proveedor en CONSUMO FINAL.`);
-    row.getCell(13).value = prov;
+    row.getCell(13).value = cf?.proveedor || '';
     // N: País de compra
-    const pais = prov ? (paisXProv[prov] || cf?.origen || mat.origen || '') : (mat.origen || '');
-    if (!pais) warnings.push(`Ítem ${mat.item} (prov: "${prov}"): país no encontrado.`);
-    row.getCell(14).value = pais;
+    row.getCell(14).value = cf?.origen || '';
     // O: Subpartida HTS (Partidas)
     row.getCell(15).value = pt?.subpartida || '';
     // P: Material Level — fijo
     row.getCell(16).value = 'PM';
     // Q: Originario para VCR (Items con Carta)
-    const cartaKey = `${mat.item}|||${prov}`;
+    const cfProv = cf?.proveedor || '';
+    const cartaKey = `${mat.item}|||${cfProv}`;
     const cartaAny = cartaSet.has(cartaKey) || [...cartaSet].some(k => k.startsWith(mat.item + '|||'));
     row.getCell(17).value = cartaAny ? 'S' : 'N';
     // R: fórmula template =IF(Q="N","NO","SI") — NO tocar
@@ -797,18 +805,20 @@ async function runGeneration(confirmed) {
 
   // Rename BOM tab and update cross-sheet formula references
   const oldBomName = bomSheet.name;
-  const newBomName = `BOM EP${epVal} - VIN ${confirmed.vin}`;
-  bomSheet.name = newBomName;
-  if (oldBomName !== newBomName) {
+  const epStripped = epVal.replace(/^EP/i, '');
+  const rawBomName = `BOM EP${epStripped} - VIN ${confirmed.vin}`;
+  const safeBomName = rawBomName.slice(0, 31);
+  bomSheet.name = safeBomName;
+  if (oldBomName !== safeBomName) {
     const escOld = oldBomName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const reOld = new RegExp(`'${escOld}'`, 'g');
     for (const ws of wb.worksheets) {
-      if (ws.name === newBomName) continue;
+      if (ws.name === safeBomName) continue;
       ws.eachRow({ includeEmpty: false }, row => {
         row.eachCell({ includeEmpty: false }, cell => {
           const v = cell.value;
           if (v && typeof v === 'object' && v.formula) {
-            const newF = v.formula.replace(reOld, `'${newBomName}'`);
+            const newF = v.formula.replace(reOld, `'${safeBomName}'`);
             if (newF !== v.formula) cell.value = { formula: newF };
           }
         });
