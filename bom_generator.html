@@ -431,135 +431,84 @@ function cellTxt(sheet, r, col) {
    Data processing from Excel files
    ============================================================ */
 function readConsumos(wb, op) {
-  const opStr = String(op || '').trim();
+  // Normalize OP to match "EP13928", "13928", or "OP-00013928"
+  const opRaw = String(op || '').trim();
+  const opNum  = opRaw.replace(/^(EP|OP-0*)/i, '');
+  const opEP   = 'EP' + opNum;
+  const opFull = 'OP-' + opNum.padStart(8, '0');
 
-  // ---- Helper: read aggregated materials from a sheet ----
-  function readMaterialsFromSheet(sheet, startRow) {
-    const h = sheetHeaders(sheet, startRow);
-    const cItem  = findCol(h, 'ítem','item','codigo','código','part number');
-    const cDesc  = findCol(h, 'descripción','descripcion','descripci');
-    const cUM    = findCol(h, 'u.m','um','unidad de medida','unidad medida','unidad');
-    const cCant  = findCol(h, 'suma de cantidad','cantidad');
-    const cCosto = findCol(h, 'suma de costo total','costo total','costo');
-    const cProv  = findCol(h, 'proveedor','razón social','razon social');
-    const cOrig  = findCol(h, 'origen','pais','país');
-    if (cItem < 1) return null;
-    const mats = [];
-    for (let r = startRow + 1; r <= sheet.rowCount; r++) {
-      const item = cellTxt(sheet, r, cItem);
-      if (!item || isNaN(Number(item))) continue;
-      mats.push({
-        item,
-        descripcion: cellTxt(sheet, r, cDesc),
-        um:          cellTxt(sheet, r, cUM),
-        cantidad:    cellVal(sheet, r, cCant) ?? 0,
-        costoTotal:  cellVal(sheet, r, cCosto) ?? 0,
-        proveedor:   cProv > 0 ? cellTxt(sheet, r, cProv) : '',
-        origen:      cOrig > 0 ? cellTxt(sheet, r, cOrig) : '',
-      });
-    }
-    return mats.length > 0 ? mats : null;
+  function matchesOP(ref1, opN, valida) {
+    const v1 = (ref1   || '').toString().trim();
+    const v2 = (opN    || '').toString().trim();
+    const v3 = (valida || '').toString().trim();
+    return v1 === opEP || v1 === opRaw || v2 === opFull || v2 === opRaw || v3 === opEP || v3 === opRaw;
   }
 
-  let materials = null;
-
-  // 1. Try FINAL sheet (already aggregated, best source)
-  const finalSheet = wb.worksheets.find(w => norm(w.name) === norm('FINAL'));
-  if (finalSheet) materials = readMaterialsFromSheet(finalSheet, 1);
-
-  // 2. Try TD GENERAL (pivot table: data starts at row 4)
-  if (!materials) {
-    const tdSheet = wb.worksheets.find(w => norm(w.name).includes('td general') || norm(w.name).includes('td_general'));
-    if (tdSheet) materials = readMaterialsFromSheet(tdSheet, 4);
-  }
-
-  // 3. Fallback: DATOS sheet (raw transactions — aggregate by item, filter by OP)
+  // ---- Hoja DATOS — única fuente del universo de ítems ----
   const datosSheet = wb.worksheets.find(w => norm(w.name).includes('dato'));
-  if (!materials && datosSheet) {
-    const dH = sheetHeaders(datosSheet);
-    const cItem  = findCol(dH, 'ítem','item','codigo','código','part number','referencia');
-    const cDesc  = findCol(dH, 'descripción','descripcion','descripci');
-    const cUM    = findCol(dH, 'u.m','um','unidad de medida','unidad medida','unidad');
-    const cCant  = findCol(dH, 'salidas','suma de cantidad','cantidad');
-    const cCosto = findCol(dH, 'costo mp','suma de costo total','costo total','costo');
-    const cIncl  = findCol(dH, 'incluir');
-    const cOP    = findCol(dH, 'referencia1','o.p. referencia','valida','op numero','orden produccion','op');
-    const cProv  = findCol(dH, 'proveedor','razón social','razon social');
-    const cOrig  = findCol(dH, 'origen','pais','país');
+  if (!datosSheet) throw new Error('No se encontró la hoja DATOS en el archivo de Consumos.');
 
-    const byItem = {};
-    for (let r = 2; r <= datosSheet.rowCount; r++) {
-      const inclRaw = cIncl > 0 ? cellTxt(datosSheet, r, cIncl).toUpperCase() : '';
-      if (inclRaw === 'NO') continue;
-      if (opStr && cOP > 0 && cellTxt(datosSheet, r, cOP) !== opStr) continue;
-      const item = cellTxt(datosSheet, r, cItem);
-      if (!item) continue;
-      if (!byItem[item]) {
-        byItem[item] = {
-          item,
-          descripcion: cellTxt(datosSheet, r, cDesc),
-          um:          cellTxt(datosSheet, r, cUM),
-          cantidad:    0,
-          costoTotal:  0,
-          proveedor:   cProv > 0 ? cellTxt(datosSheet, r, cProv) : '',
-          origen:      cOrig > 0 ? cellTxt(datosSheet, r, cOrig) : '',
-        };
-      }
-      byItem[item].cantidad   += Number(cellVal(datosSheet, r, cCant) ?? 0);
-      byItem[item].costoTotal += Number(cellVal(datosSheet, r, cCosto) ?? 0);
+  const dH      = sheetHeaders(datosSheet);
+  const dItem   = findCol(dH, 'item');
+  const dDesc   = findCol(dH, 'desc. item', 'descripcion', 'descripci');
+  const dUM     = findCol(dH, 'u.m. inv.', 'u.m', 'um', 'unidad');
+  const dCant   = findCol(dH, 'salidas (inv.)', 'salidas');
+  const dCosto  = findCol(dH, 'costo mp (sal)', 'costo mp');
+  const dIncl   = findCol(dH, 'incluir');
+  const dRef1   = findCol(dH, 'o.p. referencia1', 'referencia1');
+  const dOpNum  = findCol(dH, 'o.p. numero', 'o.p. número', 'op numero', 'op número');
+  const dValida = findCol(dH, 'valida');
+
+  const byItem = {};
+  for (let r = 2; r <= datosSheet.rowCount; r++) {
+    const inclRaw = dIncl > 0 ? cellTxt(datosSheet, r, dIncl).toUpperCase() : '';
+    if (inclRaw === 'NO') continue;
+    const ref1   = dRef1   > 0 ? cellTxt(datosSheet, r, dRef1)   : '';
+    const opN    = dOpNum  > 0 ? cellTxt(datosSheet, r, dOpNum)  : '';
+    const valida = dValida > 0 ? cellTxt(datosSheet, r, dValida) : '';
+    if (!matchesOP(ref1, opN, valida)) continue;
+    const item = cellTxt(datosSheet, r, dItem).trim();
+    if (!item) continue;
+    if (!byItem[item]) {
+      byItem[item] = {
+        item,
+        descripcion: dDesc > 0 ? cellTxt(datosSheet, r, dDesc).trim() : '',
+        um:          dUM   > 0 ? cellTxt(datosSheet, r, dUM).trim()   : '',
+        cantidad:    0,
+        costoTotal:  0,
+      };
     }
-    materials = Object.values(byItem);
+    byItem[item].cantidad   += Number(cellVal(datosSheet, r, dCant)  || 0);
+    byItem[item].costoTotal += Number(cellVal(datosSheet, r, dCosto) || 0);
   }
 
-  // ---- Costo por OP desde DATOS (Issue 5): siempre recalcular costoTotal por OP ----
-  // DATOS filtra por OP + INCLUIR != 'NO', sumando Costo MP (sal) por ítem.
-  // Esto reemplaza los costos de FINAL que son totales globales (multi-OP).
-  const datosCostMap  = {};
-  if (datosSheet) {
-    const dH2     = sheetHeaders(datosSheet);
-    const dItem2  = findCol(dH2, 'ítem','item');
-    const dCosto2 = findCol(dH2, 'costo mp (sal)','costo mp','costo total','costo');
-    const dIncl2  = findCol(dH2, 'incluir');
-    const dOP2    = findCol(dH2, 'referencia1','o.p. referencia','valida','op numero','op');
-    for (let r = 2; r <= datosSheet.rowCount; r++) {
-      if (dIncl2 > 0 && cellTxt(datosSheet, r, dIncl2).toUpperCase() === 'NO') continue;
-      if (opStr && dOP2 > 0 && cellTxt(datosSheet, r, dOP2) !== opStr) continue;
-      const it = cellTxt(datosSheet, r, dItem2);
-      if (!it) continue;
-      datosCostMap[it]  = (datosCostMap[it]  || 0) + Number(cellVal(datosSheet, r, dCosto2) || 0);
-    }
+  // Ordenar por número de ítem ascendente
+  const materials = Object.values(byItem).sort((a, b) => Number(a.item) - Number(b.item));
+  if (materials.length === 0) {
+    throw new Error(`No se encontraron movimientos para la OP "${opEP}" en DATOS. Verifique el número de EP y que las filas tengan INCLUIR distinto de "NO".`);
   }
 
-  // ---- Hoja CONSUMO FINAL — proveedor, % gastos destino, pctGastos ----
-  const cfSheet = getSheetBy(wb, 'consumo final','consumo_final');
-  const cfH = sheetHeaders(cfSheet);
-  const cfItem = findCol(cfH, 'ítem','item','codigo','código');
-  const cfProv = findCol(cfH, 'razón social','razon social','razon social proveedor','proveedor');
-  const cfGast = findCol(cfH, '% gastos destino','gastos destino','% gastos','cif');
-  const cfOrig = findCol(cfH, 'origen','pais','país');
+  // ---- Hoja CONSUMO FINAL — proveedor, país, %CIF ----
+  const cfSheet = getSheetBy(wb, 'consumo final', 'consumo_final');
+  const cfH     = sheetHeaders(cfSheet);
+  const cfItem  = findCol(cfH, 'ítem', 'item');
+  const cfProv  = findCol(cfH, 'razon social proveedor', 'razón social proveedor', 'razon social', 'razón social', 'proveedor');
+  const cfOrig  = findCol(cfH, 'origen', 'pais', 'país');
+  const cfGast  = findCol(cfH, '% gastos destino', 'gastos destino', '% gastos');
 
+  const opItemSet = new Set(materials.map(m => m.item));
   const consumoFinal = {};
   for (let r = 2; r <= cfSheet.rowCount; r++) {
-    const it = cellTxt(cfSheet, r, cfItem);
+    const it = cellTxt(cfSheet, r, cfItem).trim();
     if (!it || consumoFinal[it]) continue;
     consumoFinal[it] = {
-      proveedor: cfProv > 0 ? cellTxt(cfSheet, r, cfProv) : '',
+      proveedor: cfProv > 0 ? cellTxt(cfSheet, r, cfProv).trim() : '',
+      origen:    cfOrig > 0 ? cellTxt(cfSheet, r, cfOrig).trim() : '',
       pctGastos: normPct(cellVal(cfSheet, r, cfGast)),
-      origen:    cfOrig > 0 ? cellTxt(cfSheet, r, cfOrig) : '',
     };
   }
 
-  // Build paisXProv from consumoFinal (ORIGEN per proveedor)
-  const paisXProv = {};
-  for (const [, cf] of Object.entries(consumoFinal)) {
-    if (cf.proveedor && cf.origen) paisXProv[cf.proveedor] = cf.origen;
-  }
-  // Also fill from materials themselves if they have origen
-  for (const m of (materials || [])) {
-    if (m.proveedor && m.origen) paisXProv[m.proveedor] = m.origen;
-  }
-
-  return { materials: materials || [], consumoFinal, paisXProv, datosCostMap };
+  return { materials, consumoFinal, opItemSet };
 }
 
 function readPartidas(wb) {
