@@ -311,10 +311,11 @@ function parseFactura(txt) {
   // TRM $ 3.578,82
   const trmM = txt.match(/TRM\s*\$\s*([\d.,]+)/i);
 
-  // Product line: "1 CARROCERIA PARA BUS BUSSTAR DD S2" or description field
-  const tipoM = txt.match(/\d+\s+(CARROCER[ÍI]A\s+PARA\s+BUS\s+[^\n]+)/i) ||
-                txt.match(/CARROCER[ÍI]A\s+PARA\s+BUS\s+([^\n]+)/i) ||
-                txt.match(/Descripci[oó]n\s*[/\\]\s*Description[^\n]*\n\s*(\d+\s+.+)/i);
+  // Descripción del producto: SOLO el texto entre "Producto de Venta:" y
+  // "Producto Final" (p.ej. "CARROCERIA PARA BUS BUSSTAR DD S2"). Acotado.
+  const tipoM = txt.match(/Producto\s+de\s+Venta\s*:\s*(.+?)\s*Producto\s+Final/is) ||
+                txt.match(/\d+\s+(CARROCER[ÍI]A\s+PARA\s+BUS\s+[^\n]+)/i) ||
+                txt.match(/CARROCER[ÍI]A\s+PARA\s+BUS\s+([^\n]+)/i);
 
   // The Busscar invoice PDF extracts labels first, then USD values in order:
   // [CIF total, VALUE EXW, GASTOS ORIGEN, FLETE, SEGURO]
@@ -427,6 +428,12 @@ function cellTxt(sheet, r, col) {
   return (cellVal(sheet, r, col) ?? '').toString().trim();
 }
 
+// Limpia espacios no-rompibles ( ) → espacio normal, colapsa espacios
+// múltiples y recorta extremos. NUNCA elimina los espacios entre palabras.
+function cleanNbsp(s) {
+  return (s ?? '').toString().replace(/ /g, ' ').replace(/\s+/g, ' ').trim();
+}
+
 /* ============================================================
    Data processing from Excel files
    ============================================================ */
@@ -451,7 +458,7 @@ function readConsumos(wb, op) {
   const dH      = sheetHeaders(datosSheet);
   const dItem   = findCol(dH, 'item');
   const dDesc   = findCol(dH, 'desc. item', 'descripcion', 'descripci');
-  const dUM     = findCol(dH, 'u.m. inv.', 'u.m', 'um', 'unidad');
+  const dUM     = findCol(dH, 'u.m. inv.', 'u.m.');
   const dCant   = findCol(dH, 'salidas (inv.)', 'salidas');
   const dCosto  = findCol(dH, 'costo mp (sal)', 'costo mp');
   const dIncl   = findCol(dH, 'incluir');
@@ -492,7 +499,7 @@ function readConsumos(wb, op) {
   const cfSheet = getSheetBy(wb, 'consumo final', 'consumo_final');
   const cfH     = sheetHeaders(cfSheet);
   const cfItem  = findCol(cfH, 'ítem', 'item');
-  const cfProv  = findCol(cfH, 'razon social proveedor', 'razón social proveedor', 'razon social', 'razón social', 'proveedor');
+  const cfProv  = findCol(cfH, 'razon social proveedor', 'razón social proveedor', 'razon social', 'razón social');
   const cfOrig  = findCol(cfH, 'origen', 'pais', 'país');
   const cfGast  = findCol(cfH, '% gastos destino', 'gastos destino', '% gastos');
 
@@ -523,20 +530,40 @@ function readPartidas(wb) {
   const warnings = [];
   const out = {};
   for (let r = 2; r <= sheet.rowCount; r++) {
-    const it = cellTxt(sheet, r, cItem).trim().replace(/ /g, '').trim();
+    // El ítem es la clave; aquí sí quitamos todos los espacios para casar el código.
+    const it = cleanNbsp(cellTxt(sheet, r, cItem)).replace(/\s/g, '');
     if (!it) continue;
-    let descLarga = cDesc > 0 ? cellTxt(sheet, r, cDesc).trim().replace(/ /g, '').trim() : '';
-    const descCorta = cDescCorta > 0 ? cellTxt(sheet, r, cDescCorta).trim().replace(/ /g, '').trim() : '';
+    let descLarga = cDesc > 0 ? cleanNbsp(cellTxt(sheet, r, cDesc)) : '';
+    const descCorta = cDescCorta > 0 ? cleanNbsp(cellTxt(sheet, r, cDescCorta)) : '';
     if (!descLarga && descCorta) {
       warnings.push(`Ítem ${it}: sin DESCRIPCION LARGA, usando descripción corta como fallback.`);
       descLarga = descCorta;
     }
     out[it] = {
-      subpartida: cHTS > 0 ? cellTxt(sheet, r, cHTS).trim().replace(/ /g, '').trim() : '',
+      subpartida: cHTS > 0 ? cleanNbsp(cellTxt(sheet, r, cHTS)) : '',
       descLarga,
     };
   }
   return { partidas: out, warnings };
+}
+
+// País por proveedor — hoja "PAIS PROVEEDOR" del archivo de posiciones (Partidas).
+// Mapea "Razón social" (col B) → "Pais" (col G). Clave normalizada.
+function readPaisProveedor(wb) {
+  const sheet = wb.worksheets.find(w => norm(w.name).includes('pais proveedor')) ||
+                wb.worksheets.find(w => norm(w.name).includes('pais') && norm(w.name).includes('proveedor'));
+  if (!sheet) return null;
+  const h = sheetHeaders(sheet);
+  const cProv = findCol(h, 'razon social', 'razón social', 'proveedor');
+  const cPais = findCol(h, 'pais', 'país');
+  const map = {};
+  for (let r = 2; r <= sheet.rowCount; r++) {
+    const prov = cleanNbsp(cellTxt(sheet, r, cProv));
+    if (!prov) continue;
+    const key = norm(prov);
+    if (map[key] === undefined) map[key] = cleanNbsp(cellTxt(sheet, r, cPais));
+  }
+  return map;
 }
 
 function readCarta(wb) {
@@ -626,6 +653,8 @@ async function runGeneration(confirmed) {
   const opItemSet = new Set(materials.map(m => m.item));
   const { partidas, warnings: partidasWarnings } = readPartidas(partidasWB);
   if (partidasWarnings.length) warnings.push(...partidasWarnings);
+  const paisXProv = readPaisProveedor(partidasWB);
+  if (!paisXProv) warnings.push('No se encontró la hoja "PAIS PROVEEDOR" en el archivo de Partidas/posiciones; la columna N (País) quedará vacía.');
   const cartaSet = readCarta(cartaWB);
 
   log('Localizando hojas del template…', 32);
@@ -729,27 +758,51 @@ async function runGeneration(confirmed) {
     // K: Costo Promedio Total
     row.getCell(11).value = mat.costoTotal;
     // L: fórmula template =K-K*T — NO tocar
-    // M: Proveedor Material (CONSUMO FINAL)
+    // M: Proveedor Material (CONSUMO FINAL → "Razon Social Proveedor")
     const cf = consumoFinal[mat.item];
-    row.getCell(13).value = cf?.proveedor || '';
-    // N: País de compra
-    row.getCell(14).value = cf?.origen || '';
+    const prov = cf?.proveedor || '';
+    row.getCell(13).value = prov;
+    // N: País — desde hoja PAIS PROVEEDOR (archivo de posiciones) por proveedor
+    let pais = '';
+    if (prov && paisXProv) {
+      pais = paisXProv[norm(prov)] || '';
+      if (!pais) warnings.push(`Ítem ${mat.item}: proveedor "${prov}" no encontrado en PAIS PROVEEDOR; País vacío.`);
+    }
+    row.getCell(14).value = pais;
     // O: Subpartida HTS (Partidas)
     row.getCell(15).value = pt?.subpartida || '';
     // P: Material Level — fijo
     row.getCell(16).value = 'PM';
     // Q: Originario para VCR (Items con Carta)
-    const cfProv = cf?.proveedor || '';
-    const cartaKey = `${mat.item}|||${cfProv}`;
+    const cartaKey = `${mat.item}|||${prov}`;
     const cartaAny = cartaSet.has(cartaKey) || [...cartaSet].some(k => k.startsWith(mat.item + '|||'));
     row.getCell(17).value = cartaAny ? 'S' : 'N';
     // R: fórmula template =IF(Q="N","NO","SI") — NO tocar
     // S: Moneda — fijo
     row.getCell(19).value = 'COP';
-    // T: %CIF — NO tocar. Es fórmula VLOOKUP del template contra 'PORCENTAJES CIF'.
-    //    applyTemplate clona la fórmula de T6 en filas i>0; la fila 6 ya la trae.
+    // T: %CIF — NÚMERO directo de CONSUMO FINAL "% GASTOS DESTINO" (no fórmula).
+    //    Si está vacío → 0. La columna L (=K-(K*T)) sigue operando con el número.
+    row.getCell(20).value = (cf && typeof cf.pctGastos === 'number' && !isNaN(cf.pctGastos)) ? cf.pctGastos : 0;
 
     row.commit();
+  }
+
+  // ---- Totales K5 / L5 — rango dinámico hasta la última fila escrita ----
+  const lastRow = 5 + materials.length;
+  if (materials.length > 0) {
+    bomSheet.getCell('K5').value = { formula: `SUM(K6:K${lastRow})` };
+    bomSheet.getCell('L5').value = { formula: `SUM(L6:L${lastRow})` };
+  }
+
+  // ---- Colores: dejar SOLO filas 1-2 (títulos azules). Quitar relleno desde la 3 ----
+  for (let r = 3; r <= lastRow; r++) {
+    bomSheet.getRow(r).eachCell({ includeEmpty: false }, cell => {
+      if (cell.fill) {
+        const s = snapStyle(cell);
+        delete s.fill;
+        cell.style = s;
+      }
+    });
   }
 
   // Rename BOM tab and update cross-sheet formula references
