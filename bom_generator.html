@@ -84,7 +84,6 @@ h2{font-size:1.05rem;color:#1a3a5c;margin-bottom:12px}
       <div class="grid3">
         <div class="field"><label>COD. EXPORTACIÓN</label><input type="text" id="codExp" placeholder="EXP-2024-001"></div>
         <div class="field"><label>EP (Número de EP)</label><input type="text" id="ep" placeholder="123456"></div>
-        <div class="field"><label># OP a procesar</label><input type="text" id="op" placeholder="5001"></div>
       </div>
     </div>
 
@@ -650,13 +649,14 @@ async function runGeneration(confirmed) {
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(templateBytes.buffer);
 
+  const epVal = document.getElementById('ep').value.trim();
+
   log('Leyendo archivos Excel…', 20);
   const consumosWB = await loadWB(files.consumos);
   const partidasWB = await loadWB(files.partidas);
   const cartaWB    = await loadWB(files.carta);
 
-  const op = document.getElementById('op').value.trim();
-  const { materials, consumoFinal } = readConsumos(consumosWB, op);
+  const { materials, consumoFinal } = readConsumos(consumosWB, epVal);
   const opItemSet = new Set(materials.map(m => m.item));
   const { partidas, warnings: partidasWarnings } = readPartidas(partidasWB);
   if (partidasWarnings.length) warnings.push(...partidasWarnings);
@@ -671,7 +671,6 @@ async function runGeneration(confirmed) {
 
   // ---- VCR ----
   log('Llenando hoja VCR…', 38);
-  const epVal   = document.getElementById('ep').value.trim();
   const codExp  = document.getElementById('codExp').value.trim();
   const fobCar  = parseNum(confirmed.valorExworks) + parseNum(confirmed.valorGastosOrigen);
   const aduana  = parseNum(confirmed.valorAduana);
@@ -731,7 +730,7 @@ async function runGeneration(confirmed) {
   // ---- Material rows ----
   log('Procesando materiales…', 58);
   if (materials.length === 0) {
-    warnings.push('No se encontraron materiales. Verifique el # OP y que el archivo contenga hojas FINAL, TD GENERAL o DATOS con datos.');
+    warnings.push('No se encontraron materiales. Verifique el número de EP y que el archivo contenga datos en la hoja DATOS.');
   }
 
   // Capture template row before any writes
@@ -887,7 +886,7 @@ async function goStep2() {
 
     document.getElementById('c_marca').value   = fd.marcaChasis;
     document.getElementById('c_tipo').value    = fd.tipoCarroceria;
-    document.getElementById('c_op').value      = fd.numOP || document.getElementById('op').value;
+    document.getElementById('c_op').value      = fd.numOP || document.getElementById('ep').value;
     document.getElementById('c_vin').value     = fd.vin;
     document.getElementById('c_serie').value   = fd.serieChasis;
     document.getElementById('c_trm').value     = fd.trm;
