@@ -349,36 +349,26 @@ function parseFactura(txt) {
 }
 
 function parseDeclaracion(txt) {
-  // Field 58: Tasa de cambio (e.g. "4.034.18" = 4034.18)
-  const trmM = txt.match(/58\s*\.?\s*Tasa\s+de\s+cambio[^0-9]*([\d.]+)/i) ||
-               txt.match(/Tasa\s+de\s+cambio[^0-9]*([\d.]+)/i);
+  // Field 58: Tasa de cambio (e.g. "4.034.18" = 4034.18) — tolerante a espacios pegados
+  const trmM = txt.match(/58\s*\.?\s*Tasa\s*de\s*cambio[^0-9]*([\d.]+)/i) ||
+               txt.match(/Tasa\s*de\s*cambio[^0-9]*([\d.]+)/i);
 
-  // Field 77: Cantidad dcms (e.g. "3.00")
-  const cantM = txt.match(/77\s*\.?\s*Cantidad\s+dcms?\.?\s*([\d.]+)/i) ||
-                txt.match(/Cantidad\s+dcms?\.?\s*([\d.]+)/i);
+  // Field 77: Cantidad dcms (e.g. "3.00") — tolerante a espacios pegados
+  const cantM = txt.match(/77\s*\.?\s*Cantidad\s*dcms?\.?\s*([\d.]+)/i) ||
+                txt.match(/Cantidad\s*dcms?\.?\s*([\d.]+)/i);
 
-  // Field 78: Valor FOB USD  |  Field 79: Valor fletes USD
-  const fobM   = txt.match(/78\s*\.?\s*Valor\s+FOB\s+USD\s*([\d.,]+)/i);
-  const fleteM = txt.match(/79\s*\.?\s*Valor\s+fletes\s+USD\s*([\d.,]+)/i);
-  const segM   = txt.match(/80\s*\.?\s*Valor\s+seguro\s+USD\s*([\d.,]+)/i);
-
-  // CIF = FOB + Fletes + Seguro  →  valor de aduana
-  let valorAduana = '';
-  const fob   = parseDimNum(fobM?.[1]);
-  const flete = parseDimNum(fleteM?.[1]);
-  const seg   = parseDimNum(segM?.[1]);
-  if (fob > 0) {
-    valorAduana = (fob + flete + seg).toFixed(2);
-  }
+  // Field 84: Valor aduana USD — ya viene con FOB + fletes + seguros sumado.
+  // Tolerante a espacios pegados del PDF ("Valor aduanaUSD") y a "aduana"/"aduanas".
+  const aduM = txt.match(/84\s*\.?\s*Valor\s*aduana[s]?\s*USD\s*([\d.,]+)/i);
+  const valorAduana = aduM ? parseDimNum(aduM[1]).toFixed(2) : '';
 
   // Normalize TRM: "4.034.18" → "4034.18"
   const trmRaw = trmM?.[1] || '';
   const trmNum = parseDimNum(trmRaw);
   const tasaCambio = trmNum > 0 ? trmNum.toFixed(2) : trmRaw;
 
-  // Cantidad: strip trailing ".00"
-  const cantRaw = cantM?.[1] || '1';
-  const cantidadDcms = String(Math.round(parseDimNum(cantRaw)));
+  // Cantidad dcms (campo 77): vacío si no se encuentra (no asumir 1 en silencio)
+  const cantidadDcms = cantM ? String(Math.round(parseDimNum(cantM[1]))) : '';
 
   return { valorAduana, tasaCambio, cantidadDcms };
 }
@@ -684,15 +674,20 @@ async function runGeneration(confirmed) {
   const epVal   = document.getElementById('ep').value.trim();
   const codExp  = document.getElementById('codExp').value.trim();
   const fobCar  = parseNum(confirmed.valorExworks) + parseNum(confirmed.valorGastosOrigen);
-  const cantD   = parseNum(confirmed.cantidadDcms) || 1;
   const aduana  = parseNum(confirmed.valorAduana);
+  // Cantidad dcms (campo 77): si falta, NO asumir 1 en silencio → warning visible.
+  const cantD   = parseNum(confirmed.cantidadDcms);
+  if (!cantD || cantD <= 0) {
+    warnings.push('No se encontró la Cantidad dcms (campo 77) en la declaración; el costo del chasis por unidad (VCR H2) puede ser incorrecto. Verifique manualmente.');
+  }
+  const cantDiv = (cantD && cantD > 0) ? cantD : 1;
 
   vcrSheet.getCell('A2').value = codExp;
   vcrSheet.getCell('B2').value = epVal;
   vcrSheet.getCell('C2').value = confirmed.vin;
   vcrSheet.getCell('D2').value = fobCar;
   vcrSheet.getCell('E2').value = parseNum(confirmed.trm);
-  vcrSheet.getCell('H2').value = aduana / cantD;
+  vcrSheet.getCell('H2').value = aduana / cantDiv;
   vcrSheet.getCell('I2').value = parseNum(confirmed.trmDecl);
 
   // ---- BOM headers rows 3-5 ----
