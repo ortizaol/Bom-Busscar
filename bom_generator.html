@@ -582,7 +582,7 @@ function readCarta(wb) {
   const sheet = wb.worksheets[0];
   const h = sheetHeaders(sheet);
   const cItem = findCol(h, 'codigo item unoee', 'codigo item', 'item', 'codigo');
-  const cProv = findCol(h, 'nombre proveedor', 'proveedor', 'razón social', 'razon social');
+  const cProv = findCol(h, 'nombre proveedor');
   const cAff  = findCol(h, 'affidavit');
   const map = {};
   for (let r = 2; r <= sheet.rowCount; r++) {
