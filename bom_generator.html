@@ -511,7 +511,8 @@ function readConsumos(wb, op) {
     consumoFinal[it] = {
       proveedor: cfProv > 0 ? cellTxt(cfSheet, r, cfProv).trim() : '',
       origen:    cfOrig > 0 ? cellTxt(cfSheet, r, cfOrig).trim() : '',
-      pctGastos: normPct(cellVal(cfSheet, r, cfGast)),
+      // % GASTOS DESTINO como NÚMERO crudo, sin normalizar ni escalar.
+      pctGastos: cfGast > 0 ? (Number(cellVal(cfSheet, r, cfGast)) || 0) : 0,
     };
   }
 
@@ -585,12 +586,13 @@ function readCarta(wb) {
   const cAff  = findCol(h, 'affidavit');
   const map = {};
   for (let r = 2; r <= sheet.rowCount; r++) {
-    const it  = cellTxt(sheet, r, cItem).trim();
+    const it  = cleanNbsp(cellTxt(sheet, r, cItem)).trim();
     const pr  = normProv(cellTxt(sheet, r, cProv));
     const aff = cellTxt(sheet, r, cAff).toUpperCase().trim();
-    if (!it) continue;
+    if (!it || !pr) continue;                 // sin proveedor no se indexa: nunca un "S" sin proveedor
     const key = `${it}|||${pr}`;
-    if (!(key in map)) map[key] = aff;
+    // Clave exacta item+proveedor: si alguna fila afirma "S", queda "S".
+    if (map[key] !== 'S') map[key] = (aff === 'S') ? 'S' : (map[key] ?? aff);
   }
   return map;
 }
