@@ -566,18 +566,33 @@ function readPaisProveedor(wb) {
   return map;
 }
 
+function normProv(s) {
+  return String(s || '')
+    .toUpperCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^A-Z0-9 ]/g, ' ')
+    .replace(/\b(S A S|SAS|S A|SA|LTDA|S EN C|E U|EU|SCA|S C A)\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// Retorna mapa  (item + "|||" + normProv(nombreProveedor)) → affidavit ("S"/"N")
 function readCarta(wb) {
   const sheet = wb.worksheets[0];
   const h = sheetHeaders(sheet);
-  const cItem = findCol(h, 'ítem','item','codigo','código');
-  const cProv = findCol(h, 'proveedor','razón social','razon social','nombre');
-  const s = new Set();
+  const cItem = findCol(h, 'codigo item unoee', 'codigo item', 'item', 'codigo');
+  const cProv = findCol(h, 'nombre proveedor', 'proveedor', 'razón social', 'razon social');
+  const cAff  = findCol(h, 'affidavit');
+  const map = {};
   for (let r = 2; r <= sheet.rowCount; r++) {
-    const it = cellTxt(sheet, r, cItem);
-    const pr = cellTxt(sheet, r, cProv);
-    if (it) s.add(`${it}|||${pr}`);
+    const it  = cellTxt(sheet, r, cItem).trim();
+    const pr  = normProv(cellTxt(sheet, r, cProv));
+    const aff = cellTxt(sheet, r, cAff).toUpperCase().trim();
+    if (!it) continue;
+    const key = `${it}|||${pr}`;
+    if (!(key in map)) map[key] = aff;
   }
-  return s;
+  return map;
 }
 
 /* ============================================================
@@ -773,10 +788,9 @@ async function runGeneration(confirmed) {
     row.getCell(15).value = pt?.subpartida || '';
     // P: Material Level — fijo
     row.getCell(16).value = 'PM';
-    // Q: Originario para VCR (Items con Carta)
-    const cartaKey = `${mat.item}|||${prov}`;
-    const cartaAny = cartaSet.has(cartaKey) || [...cartaSet].some(k => k.startsWith(mat.item + '|||'));
-    row.getCell(17).value = cartaAny ? 'S' : 'N';
+    // Q: Originario para VCR — cruce por (ítem + normProv(proveedor)), sin fallback por ítem solo.
+    const cartaKey = `${mat.item}|||${normProv(prov)}`;
+    row.getCell(17).value = (cartaSet[cartaKey] === 'S') ? 'S' : 'N';
     // R: fórmula template =IF(Q="N","NO","SI") — NO tocar
     // S: Moneda — fijo
     row.getCell(19).value = 'COP';
