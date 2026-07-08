@@ -375,9 +375,23 @@ function parseDeclaracion(txt) {
 /* ============================================================
    Excel reading helpers
    ============================================================ */
-async function loadWB(file) {
+async function loadWB(file, label) {
   const wb = new ExcelJS.Workbook();
-  await wb.xlsx.load(await file.arrayBuffer());
+  const name = (file && file.name) || label || 'archivo';
+  const buf = await file.arrayBuffer();
+  // Un .xlsx válido es un ZIP: debe empezar con la firma "PK" (0x50 0x4B).
+  const sig = new Uint8Array(buf.slice(0, 2));
+  if (sig[0] === 0xD0 && sig[1] === 0xCF) {
+    throw new Error(`El archivo de ${label} ("${name}") está en formato Excel antiguo (.xls). Ábrelo en Excel y guárdalo como "Libro de Excel (.xlsx)" antes de subirlo.`);
+  }
+  if (sig[0] !== 0x50 || sig[1] !== 0x4B) {
+    throw new Error(`El archivo de ${label} ("${name}") no es un .xlsx válido (¿es un CSV, .xls o está dañado?). Vuelve a exportarlo como "Libro de Excel (.xlsx)".`);
+  }
+  try {
+    await wb.xlsx.load(buf);
+  } catch (e) {
+    throw new Error(`No se pudo leer el archivo de ${label} ("${name}"): ${e.message}. Verifica que sea un .xlsx válido.`);
+  }
   return wb;
 }
 
@@ -652,9 +666,9 @@ async function runGeneration(confirmed) {
   const epVal = document.getElementById('ep').value.trim();
 
   log('Leyendo archivos Excel…', 20);
-  const consumosWB = await loadWB(files.consumos);
-  const partidasWB = await loadWB(files.partidas);
-  const cartaWB    = await loadWB(files.carta);
+  const consumosWB = await loadWB(files.consumos, 'Consumos');
+  const partidasWB = await loadWB(files.partidas, 'Partidas');
+  const cartaWB    = await loadWB(files.carta, 'Ítems con Carta');
 
   const { materials, consumoFinal } = readConsumos(consumosWB, epVal);
   const opItemSet = new Set(materials.map(m => m.item));
